@@ -1,4 +1,7 @@
-xformers==0.0.25.post1
+# NOTE: xformers is optional. TAIR automatically uses PyTorch's native SDP
+# (Scaled Dot-Product Attention) which is faster and natively supports modern GPUs (e.g. Blackwell).
+# Hard-pinning xformers downgrades PyTorch and breaks CUDA compatibility.
+# xformers==0.0.25.post1
 omegaconf==2.3.0
 accelerate==0.28.0
 einops==0.7.0

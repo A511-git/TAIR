@@ -77,13 +77,24 @@ def load_data(accelerator, cfg):
 
 
 
+def safe_torch_load(path, map_location="cpu"):
+    """
+    Safely load checkpoints across PyTorch versions.
+    Handles the default change to weights_only=True introduced in PyTorch 2.6+.
+    """
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except (TypeError, ModuleNotFoundError):
+        return torch.load(path, map_location=map_location)
+
+
 def load_model(accelerator, device, args, cfg):
 
     loaded_models={}
 
     # default: load cldm, swinir
     cldm: ControlLDM = instantiate_from_config(cfg.model.cldm)
-    sd = torch.load(cfg.train.sd_path, map_location="cpu")["state_dict"]
+    sd = safe_torch_load(cfg.train.sd_path, map_location="cpu")["state_dict"]
     unused, missing = cldm.load_pretrained_sd(sd)
     if accelerator.is_main_process:
         print(
@@ -93,7 +104,7 @@ def load_model(accelerator, device, args, cfg):
         )
 
     if cfg.train.resume:
-        cldm.load_controlnet_from_ckpt(torch.load(cfg.train.resume, map_location="cpu"))
+        cldm.load_controlnet_from_ckpt(safe_torch_load(cfg.train.resume, map_location="cpu"))
         if accelerator.is_main_process:
             print(
                 f"strictly load controlnet weight from checkpoint: {cfg.train.resume}"
@@ -108,7 +119,7 @@ def load_model(accelerator, device, args, cfg):
             )
 
     swinir: SwinIR = instantiate_from_config(cfg.model.swinir)
-    sd = torch.load(cfg.train.swinir_path, map_location="cpu")
+    sd = safe_torch_load(cfg.train.swinir_path, map_location="cpu")
     if "state_dict" in sd:
         sd = sd["state_dict"]
     sd = {
@@ -141,7 +152,7 @@ def load_model(accelerator, device, args, cfg):
 
         # load testr pretrained weights
         if cfg.exp_args.testr_ckpt_dir is not None:
-            ckpt = torch.load(cfg.exp_args.testr_ckpt_dir, map_location="cpu")
+            ckpt = safe_torch_load(cfg.exp_args.testr_ckpt_dir, map_location="cpu")
             load_result = detector.load_state_dict(ckpt['model'], strict=False)
             
             if accelerator.is_main_process:
@@ -154,7 +165,7 @@ def load_model(accelerator, device, args, cfg):
     # -------------------------------- RESUME TRAINING ---------------------------------------
     if cfg.exp_args['resume_ckpt_dir'] is not None:
         ckpt_dir = f"{cfg.exp_args['resume_ckpt_dir']}"        
-        ckpt=torch.load(ckpt_dir, map_location="cpu")
+        ckpt = safe_torch_load(ckpt_dir, map_location="cpu")
         for model_name, model in loaded_models.items():
             if model_name in ckpt:
                 missing, unexpected = model.load_state_dict(ckpt[model_name], strict=False)
