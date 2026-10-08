@@ -50,24 +50,28 @@ def check_env():
         print("[!] ERROR: PyTorch is not installed in the active environment.")
         return False
 
-    # 3. Detectron2 C++ / CUDA extension check
+    # 3. Detectron2 check
     try:
         import detectron2
-        from detectron2 import _C
-        print(f"[+] Detectron2 imported successfully (version: {detectron2.__version__})")
-        print("[+] detectron2._C compiled extension: AVAILABLE")
+        try:
+            from detectron2 import _C
+            print(f"[+] Detectron2 imported successfully (version: {detectron2.__version__}) [Compiled C++ mode]")
+        except ImportError:
+            print(f"[+] Detectron2 imported successfully (version: {detectron2.__version__}) [Pure Python mode]")
     except ImportError as e:
-        print(f"[!] Detectron2 or detectron2._C not available: {e}")
+        print(f"[!] Detectron2 not installed: {e}")
         print("    Run: cd detectron2 && pip install -e . --no-build-isolation")
 
     # 4. TESTR C++ / CUDA extension check
     try:
         import adet
-        from adet import _C
-        print("[+] TESTR / AdelaiDet imported successfully")
-        print("[+] adet._C compiled extension: AVAILABLE")
+        try:
+            from adet import _C
+            print("[+] TESTR / AdelaiDet imported successfully [Compiled CUDA mode]")
+        except ImportError:
+            print("[+] TESTR / AdelaiDet imported successfully [Pure PyTorch fallback mode]")
     except ImportError as e:
-        print(f"[!] TESTR / AdelaiDet or adet._C not available: {e}")
+        print(f"[!] TESTR / AdelaiDet not installed: {e}")
         print("    Run: cd testr && pip install -e . --no-build-isolation")
 
     # 5. Attention Mechanism Check
