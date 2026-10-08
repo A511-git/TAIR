@@ -5,6 +5,9 @@
 
 set -e
 
+# Allow uv to manage packages in active conda or system python environments
+export UV_SYSTEM_PYTHON=1
+
 echo "=== [1/6] Verifying GPU and System Prerequisites ==="
 if ! command -v nvidia-smi &> /dev/null; then
     echo "ERROR: nvidia-smi not found. NVIDIA driver is not installed or not in PATH."

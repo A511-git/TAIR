@@ -82,13 +82,26 @@ conda activate tair
 ```
 
 ### Installation
+
+#### For Modern GPUs / NVIDIA Blackwell (RTX PRO 4500 Blackwell, sm_120, CUDA 12.8+)
+```bash
+# One-line automated setup:
+bash setup_blackwell.sh
+
+# Or manual fast pure-Python setup (no compilation needed):
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+export NO_EXT=1
+pip install -e detectron2 --no-build-isolation
+pip install -e testr --no-build-isolation
 ```
+
+#### Legacy Environment (CUDA 12.1)
+```bash
 pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
-cd detectron2 
-pip install -e .
-cd testr 
-pip install -e .
+cd detectron2 && pip install -e . && cd ..
+cd testr && pip install -e . && cd ..
 ```
 
 ### Download Pretrained Weights and Dataset
