@@ -12,6 +12,9 @@ assert torch_ver >= [1, 3], "Requires PyTorch >= 1.3"
 
 
 def get_extensions():
+    if os.getenv("NO_EXT", "0") == "1" or os.getenv("BUILD_WITHOUT_CUDA", "0") == "1":
+        return []
+
     this_dir = os.path.dirname(os.path.abspath(__file__))
     extensions_dir = os.path.join(this_dir, "adet", "layers", "csrc")
 

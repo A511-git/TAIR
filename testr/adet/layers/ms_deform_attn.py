@@ -14,16 +14,22 @@ from torch import nn
 import torch.nn.functional as F
 from torch.nn.init import xavier_uniform_, constant_
 from torch.autograd.function import once_differentiable
-from testr.adet import _C
+try:
+    from testr.adet import _C
+except ImportError:
+    _C = None
 
 class _MSDeformAttnFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, im2col_step):
-        ctx.im2col_step = im2col_step
-        output = _C.ms_deform_attn_forward(
-            value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, ctx.im2col_step)
-        ctx.save_for_backward(value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights)
-        return output
+        if _C is not None:
+            ctx.im2col_step = im2col_step
+            output = _C.ms_deform_attn_forward(
+                value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights, ctx.im2col_step)
+            ctx.save_for_backward(value, value_spatial_shapes, value_level_start_index, sampling_locations, attention_weights)
+            return output
+        else:
+            return ms_deform_attn_core_pytorch(value, value_spatial_shapes, sampling_locations, attention_weights)
 
     @staticmethod
     @once_differentiable

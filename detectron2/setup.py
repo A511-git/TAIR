@@ -38,6 +38,9 @@ def get_version():
 
 
 def get_extensions():
+    if os.getenv("NO_EXT", "0") == "1" or os.getenv("BUILD_WITHOUT_CUDA", "0") == "1":
+        return []
+
     this_dir = path.dirname(path.abspath(__file__))
     extensions_dir = path.join(this_dir, "detectron2", "layers", "csrc")
 
