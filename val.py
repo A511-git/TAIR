@@ -114,8 +114,8 @@ def main(args):
         lq_id = lq_img_path.split('/')[-1].split('.')[0]
         assert gt_id == lq_id, f"gt_img_path: {gt_img_path}, lq_img_path: {lq_img_path} do not match"
         
-        gt_img = Image.open(gt_img_path)     # size: 512
-        lq_img = Image.open(lq_img_path)     # size: 128
+        gt_img = Image.open(gt_img_path).convert("RGB")     # size: 512
+        lq_img = Image.open(lq_img_path).convert("RGB")     # size: 128
         
         val_gt = preprocess_gt(gt_img).unsqueeze(0).to(device)  # 1 3 512 512
         val_lq = preprocess_lq(lq_img).unsqueeze(0).to(device)  # 1 3 512 512
