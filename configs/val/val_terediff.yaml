@@ -116,6 +116,6 @@ exp_args:
   mode: VAL
   model_name: terediff_stage3
   testr_ckpt_dir: 
-  resume_ckpt_dir: /PATH/TO/YOUR/STAGE3/CKPT/FILE.pt  # to use our ckpt set it to /PATH/TO/terediff_stage3.pt
+  resume_ckpt_dir: ./weights/terediff_stage3.pt
   save_val_img_dir: ./val_demo_result
   prompt_style: CAPTION   # choose from [CAPTION, TAG] for prompting styles

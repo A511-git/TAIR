@@ -34,8 +34,8 @@ if [ -n "$CUDA_HOME" ]; then
     nvcc --version | grep "release"
 fi
 
-echo "=== [2/6] Installing uv and PyTorch with CUDA 12.8 (Blackwell Support) ==="
-pip install uv ninja
+echo "=== [2/6] Installing uv, ninja, gdown, and PyTorch with CUDA 12.8 (Blackwell Support) ==="
+pip install uv ninja gdown
 uv pip install --upgrade setuptools wheel
 
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128

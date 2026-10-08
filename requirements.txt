@@ -22,6 +22,7 @@ torchsde==0.2.6
 bitsandbytes==0.44.1
 wandb==0.19.8
 pyiqa==0.1.13
+gdown
 
 # requirements for llava
 transformers==4.37.2

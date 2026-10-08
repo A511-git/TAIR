@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Model weight downloader with Hugging Face byte-to-byte & torch integrity check
+# Automated model downloader: Hugging Face foundation weights + TeReDiff Stage 3
 # ==============================================================================
 
 set -e
@@ -9,11 +9,19 @@ mkdir -p weights
 python3 - << 'EOF'
 import os
 import sys
-import urllib.request
 import subprocess
+import urllib.request
 import torch
 
-MODELS = [
+# Ensure gdown is available for downloading TeReDiff from Google Drive
+try:
+    import gdown
+except ImportError:
+    print("[*] Installing gdown for Google Drive downloads...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "gdown"], check=True)
+    import gdown
+
+HF_MODELS = [
     {
         "name": "realesrgan_s4_swinir_100k.pth",
         "url": "https://huggingface.co/lxq007/DiffBIR-v2/resolve/main/realesrgan_s4_swinir_100k.pth",
@@ -28,45 +36,74 @@ MODELS = [
     },
 ]
 
-for m in MODELS:
+GDRIVE_MODELS = [
+    {
+        "name": "terediff_stage3.pt",
+        "gdrive_id": "14qtLOso_kurfY_FOzOWUR8z-_IvRwy-X",
+        "min_size_mb": 1400,
+    },
+]
+
+print("=== [1/2] Verifying & Downloading Hugging Face Foundation Models ===")
+for m in HF_MODELS:
     path = os.path.join("weights", m["name"])
     
-    # 1. Query exact remote byte length from Hugging Face
     req = urllib.request.Request(m["url"], headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req) as resp:
         expected_bytes = int(resp.headers.get("content-length"))
 
-    print(f"\n[*] Checking {m['name']} (Remote size: {expected_bytes:,} bytes)...")
-
-    # 2. Check local file byte size and integrity
+    print(f"\n[*] Checking {m['name']} (Expected: {expected_bytes:,} bytes)...")
     need_download = True
     if os.path.exists(path):
         local_bytes = os.path.getsize(path)
         if local_bytes == expected_bytes:
-            print(f"    Byte size matches ({local_bytes:,} bytes). Verifying torch checkpoint integrity...")
             try:
                 torch.load(path, map_location="cpu", weights_only=False)
-                print(f"[+] VERIFIED 100%: {m['name']} is complete and loadable. Skipping download.")
+                print(f"[+] VERIFIED 100%: {m['name']} is complete and valid. Skipping.")
                 need_download = False
             except Exception as e:
-                print(f"[!] File corrupted ({e}). Removing and re-downloading...")
+                print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
                 os.remove(path)
         elif local_bytes < expected_bytes:
-            pct = (local_bytes / expected_bytes) * 100
-            print(f"[>] Incomplete file ({local_bytes:,} / {expected_bytes:,} bytes, {pct:.1f}%). Resuming download...")
+            print(f"[>] Incomplete file ({local_bytes:,} / {expected_bytes:,} bytes). Resuming...")
         else:
-            print(f"[!] File exceeds remote size ({local_bytes:,} > {expected_bytes:,}). Resetting...")
+            print(f"[!] File size mismatch. Resetting...")
             os.remove(path)
 
-    # 3. Download / Resume if needed
     if need_download:
         subprocess.run(["wget", "-c", "--show-progress", m["url"], "-O", path], check=True)
-        final_bytes = os.path.getsize(path)
-        assert final_bytes == expected_bytes, f"Size mismatch for {m['name']}: {final_bytes} != {expected_bytes}"
+        assert os.path.getsize(path) == expected_bytes, f"Byte size mismatch for {m['name']}"
         torch.load(path, map_location="cpu", weights_only=False)
-        print(f"[+] VERIFIED 100%: {m['name']} is complete and verified against Hugging Face!")
+        print(f"[+] VERIFIED 100%: {m['name']} matches Hugging Face byte-for-byte!")
+
+print("\n=== [2/2] Verifying & Downloading TeReDiff Stage 3 Checkpoint (Paper Model) ===")
+for m in GDRIVE_MODELS:
+    path = os.path.join("weights", m["name"])
+    need_download = True
+    
+    if os.path.exists(path):
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        if size_mb >= m["min_size_mb"]:
+            try:
+                ckpt = torch.load(path, map_location="cpu", weights_only=False)
+                print(f"[+] VERIFIED 100%: {m['name']} is complete ({size_mb:.1f} MB, keys: {list(ckpt.keys())}). Skipping.")
+                need_download = False
+            except Exception as e:
+                print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
+                os.remove(path)
+        else:
+            print(f"[!] Incomplete file ({size_mb:.1f} MB < {m['min_size_mb']} MB). Re-downloading...")
+            os.remove(path)
+
+    if need_download:
+        print(f"[>] Downloading {m['name']} from Google Drive...")
+        gdown.download(id=m["gdrive_id"], output=path, quiet=False)
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        assert size_mb >= m["min_size_mb"], f"Downloaded file too small: {size_mb} MB"
+        torch.load(path, map_location="cpu", weights_only=False)
+        print(f"[+] VERIFIED 100%: {m['name']} downloaded and verified successfully!")
 
 print("\n==================================================================")
-print("[+] All model weights verified byte-for-byte and loadable!")
+print("[+] All professional model weights downloaded, verified, and ready!")
 print("==================================================================")
 EOF
