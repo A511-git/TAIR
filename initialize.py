@@ -163,18 +163,22 @@ def load_model(accelerator, device, args, cfg):
     
 
     # -------------------------------- RESUME TRAINING ---------------------------------------
-    if cfg.exp_args['resume_ckpt_dir'] is not None:
-        ckpt_dir = f"{cfg.exp_args['resume_ckpt_dir']}"        
-        ckpt = safe_torch_load(ckpt_dir, map_location="cpu")
-        for model_name, model in loaded_models.items():
-            if model_name in ckpt:
-                missing, unexpected = model.load_state_dict(ckpt[model_name], strict=False)
-                print(f"RESUME TRAINING - Loaded {model_name} | Missing keys: {len(missing)} | Unexpected keys: {len(unexpected)}")
-            else:
-                print(f"Warning: No checkpoint found for {model_name}")
-        for model in loaded_models.values():
-            model.to(device)
-        return loaded_models, ckpt_dir
+    resume_ckpt = cfg.exp_args.get('resume_ckpt_dir', None)
+    if resume_ckpt is not None and str(resume_ckpt).strip() != "" and not str(resume_ckpt).startswith("/PATH/TO/"):
+        if os.path.exists(str(resume_ckpt)):
+            ckpt = safe_torch_load(resume_ckpt, map_location="cpu")
+            for model_name, model in loaded_models.items():
+                if model_name in ckpt:
+                    missing, unexpected = model.load_state_dict(ckpt[model_name], strict=False)
+                    print(f"RESUME TRAINING - Loaded {model_name} | Missing keys: {len(missing)} | Unexpected keys: {len(unexpected)}")
+                else:
+                    print(f"Warning: No checkpoint found for {model_name}")
+            for model in loaded_models.values():
+                model.to(device)
+            return loaded_models, resume_ckpt
+        else:
+            if accelerator.is_main_process:
+                print(f"[!] Warning: Resume checkpoint not found at '{resume_ckpt}'. Proceeding with initial base model weights.")
 
     return loaded_models, None
 

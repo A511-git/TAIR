@@ -1,4 +1,4 @@
-mkdir weights 
+mkdir -p weights 
 cd weights
 
 wget https://huggingface.co/lxq007/DiffBIR-v2/resolve/main/realesrgan_s4_swinir_100k.pth
