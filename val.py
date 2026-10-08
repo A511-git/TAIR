@@ -41,9 +41,10 @@ def main(args):
         )
 
     
-    # load demo images from demo_imgs/ folder
-    gt_imgs_path = sorted([f"{cfg.dataset.gt_img_path}/{img}" for img in os.listdir(cfg.dataset.gt_img_path) if img.endswith(".jpg")])
-    lq_imgs_path = sorted([f"{cfg.dataset.lq_img_path}/{img}" for img in os.listdir(cfg.dataset.lq_img_path) if img.endswith(".jpg")])
+    # load demo images from dataset folders
+    valid_exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+    gt_imgs_path = sorted([os.path.join(cfg.dataset.gt_img_path, img) for img in os.listdir(cfg.dataset.gt_img_path) if img.lower().endswith(valid_exts)])
+    lq_imgs_path = sorted([os.path.join(cfg.dataset.lq_img_path, img) for img in os.listdir(cfg.dataset.lq_img_path) if img.lower().endswith(valid_exts)])
 
                     
     # load models
@@ -110,8 +111,8 @@ def main(args):
     
     for val_batch_idx, (gt_img_path, lq_img_path) in enumerate(tqdm(zip(gt_imgs_path, lq_imgs_path), desc='val', total=len(gt_imgs_path))):
         
-        gt_id = gt_img_path.split('/')[-1].split('.')[0]
-        lq_id = lq_img_path.split('/')[-1].split('.')[0]
+        gt_id = os.path.splitext(os.path.basename(gt_img_path))[0]
+        lq_id = os.path.splitext(os.path.basename(lq_img_path))[0]
         assert gt_id == lq_id, f"gt_img_path: {gt_img_path}, lq_img_path: {lq_img_path} do not match"
         
         gt_img = Image.open(gt_img_path).convert("RGB")     # size: 512
