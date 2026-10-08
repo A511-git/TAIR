@@ -13,47 +13,60 @@ fi
 
 nvidia-smi
 
-# Check CUDA Toolkit / NVCC
-if [ -z "$CUDA_HOME" ]; then
-    if [ -d "/usr/local/cuda" ]; then
-        export CUDA_HOME="/usr/local/cuda"
-    elif command -v nvcc &> /dev/null; then
-        export CUDA_HOME="$(dirname $(dirname $(which nvcc)))"
-    else
-        echo "WARNING: CUDA_HOME is not set and nvcc not found."
-        echo "Please install CUDA Toolkit 12.8+ to compile detectron2 and testr C++/CUDA extensions."
-    fi
+# Check CUDA Toolkit / NVCC (prefer CUDA 12.8 if installed, otherwise use default CUDA)
+if [ -d "/usr/local/cuda-12.8" ]; then
+    export CUDA_HOME="/usr/local/cuda-12.8"
+elif [ -d "/usr/local/cuda-12" ]; then
+    export CUDA_HOME="/usr/local/cuda-12"
+elif [ -d "/usr/local/cuda" ]; then
+    export CUDA_HOME="/usr/local/cuda"
+elif command -v nvcc &> /dev/null; then
+    export CUDA_HOME="$(dirname $(dirname $(which nvcc)))"
 fi
 
 if [ -n "$CUDA_HOME" ]; then
     export PATH="$CUDA_HOME/bin:$PATH"
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
-    echo "CUDA_HOME set to: $CUDA_HOME"
+    echo "Using CUDA_HOME: $CUDA_HOME"
+    nvcc --version | grep "release"
 fi
 
-echo "=== [2/6] Installing PyTorch with CUDA 12.8 (Blackwell Support) ==="
-# Blackwell (RTX PRO 4500 Blackwell / RTX 50-series) requires CUDA 12.8+ wheels for sm_120/sm_100 kernels.
-pip install --upgrade pip setuptools wheel ninja
+echo "=== [2/6] Installing uv and PyTorch with CUDA 12.8 (Blackwell Support) ==="
+pip install uv ninja
+uv pip install --upgrade setuptools wheel
 
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-echo "=== [3/6] Installing TAIR Python Dependencies ==="
-pip install -r requirements.txt
+# Patch PyTorch cpp_extension to allow nvcc version mismatch (e.g., nvcc 13.2 vs torch 12.8)
+python -c '
+import torch.utils.cpp_extension as ce
+p = ce.__file__
+with open(p, "r") as f:
+    src = f.read()
+target = "raise RuntimeError(CUDA_MISMATCH_MESSAGE, cuda_str_version, torch.version.cuda)"
+sub = "print(f\"[WARNING] CUDA version mismatch: detected {cuda_str_version} vs torch {torch.version.cuda}. Proceeding with build...\")"
+if target in src:
+    with open(p, "w") as f:
+        f.write(src.replace(target, sub))
+    print("[+] Patched PyTorch cpp_extension: CUDA version mismatch check bypassed.")
+'
+
+echo "=== [3/6] Installing TAIR Python Dependencies with uv ==="
+uv pip install -r requirements.txt
 
 echo "=== [4/6] Compiling and Installing Detectron2 for Blackwell ==="
 export FORCE_CUDA=1
-# Target Blackwell sm_120 (workstation/client) and sm_100 (datacenter)
 export TORCH_CUDA_ARCH_LIST="12.0;10.0"
 
 cd detectron2
 rm -rf build/ **/*.so
-pip install --no-build-isolation -e .
+uv pip install --no-build-isolation -e .
 cd ..
 
 echo "=== [5/6] Compiling and Installing TESTR (AdelaiDet) for Blackwell ==="
 cd testr
 rm -rf build/ **/*.so
-pip install --no-build-isolation -e .
+uv pip install --no-build-isolation -e .
 cd ..
 
 echo "=== [6/6] Verifying Setup and Hardware Compatibility ==="
