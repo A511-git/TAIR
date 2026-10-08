@@ -53,11 +53,12 @@ def check_env():
     # 3. Detectron2 check
     try:
         import detectron2
+        ver = getattr(detectron2, "__version__", "dev")
         try:
             from detectron2 import _C
-            print(f"[+] Detectron2 imported successfully (version: {detectron2.__version__}) [Compiled C++ mode]")
+            print(f"[+] Detectron2 imported successfully (version: {ver}) [Compiled C++ mode]")
         except ImportError:
-            print(f"[+] Detectron2 imported successfully (version: {detectron2.__version__}) [Pure Python mode]")
+            print(f"[+] Detectron2 imported successfully (version: {ver}) [Pure Python mode]")
     except ImportError as e:
         print(f"[!] Detectron2 not installed: {e}")
         print("    Run: cd detectron2 && pip install -e . --no-build-isolation")
