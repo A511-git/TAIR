@@ -65,7 +65,11 @@ def check_env():
 
     # 4. TESTR C++ / CUDA extension check
     try:
-        import adet
+        try:
+            import adet
+        except ImportError:
+            sys.path.append(os.path.join(os.getcwd(), "testr"))
+            import adet
         try:
             from adet import _C
             print("[+] TESTR / AdelaiDet imported successfully [Compiled CUDA mode]")
