@@ -199,12 +199,18 @@ class RemoteBridgeLauncher:
             print("[!] Warning: Cloudflare tunnel for Upload Portal failed to acquire URL.")
 
         # -------------------------------------------------------------
-        # 2. Start Confirmed Link 2: Standard python -m http.server
+        # 2. Start Confirmed Link 2: Custom Multi-Path Repo & NVMe Viewer
         # -------------------------------------------------------------
         actual_http_port = find_available_port(self.http_port)
         print(f"\n[2/3] Launching Confirmed Link 2: Repo & Results HTTP Server (Port {actual_http_port})...")
+        viewer_script = SCRIPT_DIR / "repo_viewer.py"
         http_proc = subprocess.Popen(
-            [sys.executable, "-m", "http.server", str(actual_http_port), "--directory", str(self.repo_dir)],
+            [
+                sys.executable, str(viewer_script),
+                "--repo", str(self.repo_dir),
+                "--port", str(actual_http_port),
+                "--workspace", str(self.workspace_dir)
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
