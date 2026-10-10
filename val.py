@@ -218,11 +218,26 @@ def main(args):
             
             # save sampled images   
             if cfg.log_args.log_tool is None:
-                img_save_path = f'{cfg.exp_args.save_val_img_dir}'
-                os.makedirs(img_save_path, exist_ok=True)
+                # Mirror original subdirectory structure relative to input dataset directory
+                rel_path = os.path.relpath(lq_img_path, cfg.dataset.lq_img_path)
+                sub_dir = os.path.dirname(rel_path)
+                orig_filename = os.path.basename(lq_img_path)
+
+                target_dir = os.path.join(cfg.exp_args.save_val_img_dir, sub_dir)
+                os.makedirs(target_dir, exist_ok=True)
+
+                out_file_path = os.path.join(target_dir, orig_filename)
+                if not os.path.splitext(out_file_path)[1]:
+                    out_file_path += ".png"
+
                 restored_img_pil = TF.to_pil_image(restored_img.squeeze().cpu())
-                restored_img_pil.save(f'{img_save_path}/restored_{gt_id}.png')
-                img_of_pred_text.save(f'{img_save_path}/pred_texts_{gt_id}.png')
+                restored_img_pil.save(out_file_path)
+
+                if getattr(args, 'save_pred_texts', False):
+                    pred_dir = os.path.join(cfg.exp_args.save_val_img_dir, "pred_texts", sub_dir)
+                    os.makedirs(pred_dir, exist_ok=True)
+                    pred_filename = orig_filename if os.path.splitext(orig_filename)[1] else f"{orig_filename}.png"
+                    img_of_pred_text.save(os.path.join(pred_dir, pred_filename))
             
             # log total psnr, ssim, lpips for val if ground truth is available
             if val_gt is not None:
@@ -309,5 +324,6 @@ if __name__ == "__main__":
     parser.add_argument('--input_dir', '--lq_dir', type=str, default=None, help="Directory containing low-quality images (overrides config)")
     parser.add_argument('--output_dir', '--save_dir', type=str, default=None, help="Directory to save restored images (overrides config)")
     parser.add_argument('--gt_dir', type=str, default=None, help="Optional directory containing ground-truth images")
+    parser.add_argument('--save_pred_texts', action="store_true", default=False, help="Save OCR text prediction visualization images in a separate folder")
     args = parser.parse_args()
     main(args)

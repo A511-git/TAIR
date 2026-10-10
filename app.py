@@ -206,60 +206,78 @@ def restore_batch_images(files, use_server_dir=False, prompt_style="CAPTION", st
     if not weights_path.exists():
         return [], "⚠️ Model weights not found at ./weights/terediff_stage3.pt! Please run bash download_weights.sh.", None
 
-    image_paths = []
+    # Each element: (full_path_str, relative_path_str)
+    tasks = []
     if use_server_dir:
         server_dir = REPO_ROOT / "uploaded_stuff"
         if server_dir.exists():
             for p in sorted(server_dir.rglob("*")):
                 if is_valid_image_file(p):
-                    image_paths.append(str(p))
+                    rel = p.relative_to(server_dir)
+                    tasks.append((str(p), str(rel)))
     elif files:
         for f in files:
             path_str = f if isinstance(f, str) else getattr(f, "name", str(f))
             p = Path(path_str)
             if p.is_dir():
-                for sub in p.rglob("*"):
+                for sub in sorted(p.rglob("*")):
                     if is_valid_image_file(sub):
-                        image_paths.append(str(sub))
+                        rel = sub.relative_to(p)
+                        tasks.append((str(sub), str(rel)))
             elif is_valid_image_file(p):
-                image_paths.append(str(p))
+                tasks.append((str(p), p.name))
 
-    if not image_paths:
+    if not tasks:
         return [], "⚠️ No valid images found to restore. Please upload images/folder or check ./uploaded_stuff.", None
 
-    total = len(image_paths)
+    total = len(tasks)
     gallery_items = []
     timestamp = int(time.time())
     out_dir = REPO_ROOT / "results" / f"batch_{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = REPO_ROOT / "results" / f"restored_batch_{timestamp}.zip"
+    results_root = REPO_ROOT / "results"
 
     pipe = load_pipeline()
-    for idx, img_path in enumerate(image_paths):
-        progress((idx + 1) / total, desc=f"Restoring image {idx+1}/{total}...")
+    for idx, (img_path, rel_path) in enumerate(tasks):
+        progress((idx + 1) / total, desc=f"Restoring image {idx+1}/{total} ({rel_path})...")
         try:
             with Image.open(img_path) as raw:
                 img_pil = raw.convert("RGB")
             
             restored, _, text_summary = restore_single_image(img_pil, prompt_style, steps, cfg_scale, score_threshold)
             if restored:
-                stem = Path(img_path).stem
-                out_file = out_dir / f"restored_{stem}.png"
+                rel_p = Path(rel_path)
+                # Ensure target file has image extension if original lacked one
+                if not rel_p.suffix:
+                    rel_p = rel_p.with_suffix(".png")
+
+                # 1. Save in timestamped batch folder preserving directory hierarchy
+                out_file = out_dir / rel_p
+                out_file.parent.mkdir(parents=True, exist_ok=True)
                 restored.save(out_file)
-                gallery_items.append((restored, f"Restored {stem}"))
+
+                # 2. Mirror into main ./results/ folder preserving exact subfolders & original filename
+                mirror_file = results_root / rel_p
+                mirror_file.parent.mkdir(parents=True, exist_ok=True)
+                restored.save(mirror_file)
+
+                gallery_items.append((restored, f"{rel_path}"))
         except Exception as e:
             print(f"[!] Error processing {img_path}: {e}")
 
-    # Build ZIP archive of all restored images
+    # Build ZIP archive preserving subfolder hierarchy
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for f in out_dir.glob("*.png"):
-            zipf.write(f, arcname=f.name)
+        for f in out_dir.rglob("*"):
+            if f.is_file():
+                zipf.write(f, arcname=str(f.relative_to(out_dir)))
 
     summary_msg = (
         f"🎉 **Batch Restoration Complete!**\n\n"
         f"• **Total Images Processed**: {len(gallery_items)} / {total}\n"
-        f"• **Saved on NVMe Disk**: `{out_dir}`\n"
-        f"• **Download Package Ready**: Click the button below to download the ZIP file."
+        f"• **Subfolder Structure & Original Filenames Preserved** ✅\n"
+        f"• **Mirrored to Results**: `{results_root}`\n"
+        f"• **Batch Package Ready**: Download ZIP contains full original subfolder tree."
     )
     return gallery_items, summary_msg, str(zip_path)
 
