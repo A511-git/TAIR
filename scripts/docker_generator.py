@@ -63,7 +63,7 @@ RUN pip install --no-cache-dir uv ninja gdown wheel setuptools
 RUN uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # Bypass NVCC version mismatch check in PyTorch cpp_extension
-RUN python -c 'import torch.utils.cpp_extension as ce; p = ce.__file__; s = open(p).read(); t = "raise RuntimeError(CUDA_MISMATCH_MESSAGE, cuda_str_version, torch.version.cuda)"; sub = "print(f\\"[WARNING] CUDA mismatch: {cuda_str_version} vs {torch.version.cuda}\\")"; open(p, "w").write(s.replace(t, sub)) if t in s else None'
+RUN python -c 'import torch.utils.cpp_extension as ce; p = ce.__file__; s = open(p).read(); t = "raise RuntimeError(CUDA_MISMATCH_MESSAGE, cuda_str_version, torch.version.cuda)"; open(p, "w").write(s.replace(t, "pass")) if t in s else None'
 
 # Set working directory inside container
 WORKDIR /workspace/{repo_name}

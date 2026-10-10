@@ -42,16 +42,15 @@ Run the Remote Bridge in the background on your host machine to provision NVMe s
 ### Linux / Remote SSH Host:
 ```bash
 mkdir -p .remote_bridge && nohup python3 scripts/remote_bridge_launcher.py --repo . > .remote_bridge/bridge.log 2>&1 &
+sleep 4
+cat .remote_bridge/bridge_links.md
 ```
 
 ### Windows (PowerShell):
 ```powershell
 Start-Process python -ArgumentList "scripts/remote_bridge_launcher.py --repo ." -WindowStyle Hidden
-```
-
-### View Your Active Access Links:
-```bash
-cat .remote_bridge/bridge_links.md
+Start-Sleep -Seconds 4
+Get-Content .remote_bridge/bridge_links.md
 ```
 You will get 3 confirmed active access links:
 - **Confirmed Link 1 (Upload Portal)**: Drag-and-drop degraded test images or entire folders from your browser directly into `./uploaded_stuff/`.

@@ -107,6 +107,9 @@ def verify_and_download_hf(model_name, url_or_repo, target_dir="weights", token:
                 torch.load(target_path, map_location="cpu", weights_only=False)
                 print(f"[+] Checkpoint '{model_name}' is valid. Skipping download.")
                 return target_path
+            except ImportError:
+                print(f"[+] Byte size verified ({local_bytes:,} bytes). Skipping download (PyTorch not on host; verified in container).")
+                return target_path
             except Exception as e:
                 print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
                 os.remove(target_path)

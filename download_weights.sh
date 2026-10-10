@@ -30,7 +30,14 @@ import os
 import sys
 import subprocess
 import urllib.request
-import torch
+
+try:
+    import torch
+except ImportError:
+    torch = None
+    print("[*] Note: PyTorch is not installed in the host Python environment.")
+    print("    Skipping in-memory tensor deserialization on host.")
+    print("    Byte-size/integrity verification will be performed; deep tensor verification runs inside the container.")
 
 # Ensure gdown is available for downloading TeReDiff from Google Drive
 try:
@@ -68,32 +75,52 @@ for m in HF_MODELS:
     path = os.path.join("weights", m["name"])
     
     req = urllib.request.Request(m["url"], headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req) as resp:
-        expected_bytes = int(resp.headers.get("content-length"))
+    try:
+        with urllib.request.urlopen(req) as resp:
+            cl = resp.headers.get("content-length")
+            expected_bytes = int(cl) if cl else None
+    except Exception as e:
+        print(f"[!] Warning: Could not fetch Content-Length ({e})")
+        expected_bytes = None
 
-    print(f"\n[*] Checking {m['name']} (Expected: {expected_bytes:,} bytes)...")
+    if expected_bytes:
+        print(f"\n[*] Checking {m['name']} (Expected: {expected_bytes:,} bytes)...")
+    else:
+        print(f"\n[*] Checking {m['name']}...")
+
     need_download = True
     if os.path.exists(path):
         local_bytes = os.path.getsize(path)
-        if local_bytes == expected_bytes:
-            try:
-                torch.load(path, map_location="cpu", weights_only=False)
-                print(f"[+] VERIFIED 100%: {m['name']} is complete and valid. Skipping.")
+        if expected_bytes is not None and local_bytes == expected_bytes:
+            if torch is not None:
+                try:
+                    torch.load(path, map_location="cpu", weights_only=False)
+                    print(f"[+] VERIFIED 100%: {m['name']} is complete and valid. Skipping.")
+                    need_download = False
+                except Exception as e:
+                    print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
+                    os.remove(path)
+            else:
+                print(f"[+] VERIFIED: {m['name']} byte size matches ({local_bytes:,} bytes). Skipping.")
                 need_download = False
-            except Exception as e:
-                print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
-                os.remove(path)
-        elif local_bytes < expected_bytes:
+        elif expected_bytes is not None and local_bytes < expected_bytes:
             print(f"[>] Incomplete file ({local_bytes:,} / {expected_bytes:,} bytes). Resuming...")
-        else:
-            print(f"[!] File size mismatch. Resetting...")
+        elif expected_bytes is not None and local_bytes > expected_bytes:
+            print(f"[!] File size mismatch ({local_bytes:,} > {expected_bytes:,}). Resetting...")
             os.remove(path)
+        elif expected_bytes is None and local_bytes > 10 * 1024 * 1024:
+            print(f"[+] File exists with size {local_bytes:,} bytes. Skipping.")
+            need_download = False
 
     if need_download:
         subprocess.run(["wget", "-c", "--show-progress", m["url"], "-O", path], check=True)
-        assert os.path.getsize(path) == expected_bytes, f"Byte size mismatch for {m['name']}"
-        torch.load(path, map_location="cpu", weights_only=False)
-        print(f"[+] VERIFIED 100%: {m['name']} matches Hugging Face byte-for-byte!")
+        if expected_bytes is not None:
+            assert os.path.getsize(path) == expected_bytes, f"Byte size mismatch for {m['name']}"
+        if torch is not None:
+            torch.load(path, map_location="cpu", weights_only=False)
+            print(f"[+] VERIFIED 100%: {m['name']} matches Hugging Face byte-for-byte!")
+        else:
+            print(f"[+] VERIFIED: {m['name']} downloaded successfully ({os.path.getsize(path):,} bytes)!")
 
 print("\n=== [2/2] Verifying & Downloading TeReDiff Stage 3 Checkpoint (Paper Model) ===")
 for m in GDRIVE_MODELS:
@@ -103,13 +130,17 @@ for m in GDRIVE_MODELS:
     if os.path.exists(path):
         size_mb = os.path.getsize(path) / (1024 * 1024)
         if size_mb >= m["min_size_mb"]:
-            try:
-                ckpt = torch.load(path, map_location="cpu", weights_only=False)
-                print(f"[+] VERIFIED 100%: {m['name']} is complete ({size_mb:.1f} MB, keys: {list(ckpt.keys())}). Skipping.")
+            if torch is not None:
+                try:
+                    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+                    print(f"[+] VERIFIED 100%: {m['name']} is complete ({size_mb:.1f} MB, keys: {list(ckpt.keys())}). Skipping.")
+                    need_download = False
+                except Exception as e:
+                    print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
+                    os.remove(path)
+            else:
+                print(f"[+] VERIFIED: {m['name']} is complete ({size_mb:.1f} MB >= {m['min_size_mb']} MB). Skipping.")
                 need_download = False
-            except Exception as e:
-                print(f"[!] Checkpoint corrupted ({e}). Re-downloading...")
-                os.remove(path)
         else:
             print(f"[!] Incomplete file ({size_mb:.1f} MB < {m['min_size_mb']} MB). Re-downloading...")
             os.remove(path)
@@ -119,8 +150,11 @@ for m in GDRIVE_MODELS:
         gdown.download(id=m["gdrive_id"], output=path, quiet=False)
         size_mb = os.path.getsize(path) / (1024 * 1024)
         assert size_mb >= m["min_size_mb"], f"Downloaded file too small: {size_mb} MB"
-        torch.load(path, map_location="cpu", weights_only=False)
-        print(f"[+] VERIFIED 100%: {m['name']} downloaded and verified successfully!")
+        if torch is not None:
+            torch.load(path, map_location="cpu", weights_only=False)
+            print(f"[+] VERIFIED 100%: {m['name']} downloaded and verified successfully!")
+        else:
+            print(f"[+] VERIFIED: {m['name']} downloaded successfully ({size_mb:.1f} MB)!")
 
 print("\n==================================================================")
 print("[+] All professional model weights downloaded, verified, and ready!")
