@@ -77,10 +77,20 @@ def run_batch_inference(input_dir: str, output_dir: str, config: str = "configs/
     print("=" * 72)
 
     images = find_valid_images(in_path, recursive=recursive)
-    print(f"[*] Found {len(images)} valid images to process.")
     if not images:
-        print("[!] No images found to restore. Upload test images into ./uploaded_stuff first!")
-        return False
+        demo_dir = repo_dir / "assets" / "demo_img"
+        if demo_dir.exists() and any(demo_dir.glob("*.png")):
+            print("[*] No custom uploads found in input folder.")
+            print("[*] Automatically loading sample degraded images from assets/demo_img for end-to-end verification...")
+            for f in demo_dir.glob("*.png"):
+                shutil.copy(str(f), str(in_path / f.name))
+            images = find_valid_images(in_path, recursive=recursive)
+            print(f"[+] Loaded {len(images)} sample images into {input_dir}!")
+        else:
+            print(f"[!] No images found in {input_dir}. Please upload images via Link 1 (Upload Portal) first!")
+            return False
+
+    print(f"[*] Processing {len(images)} images...")
 
     weights_ok = verify_weights(repo_dir)
     if not weights_ok:

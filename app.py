@@ -15,6 +15,18 @@ import torchvision.transforms.functional as TF
 from omegaconf import OmegaConf
 import gradio as gr
 
+# Patch Gradio 4.43.0 ASGI schema bug where boolean additionalProperties crashes json_schema_to_python_type
+try:
+    import gradio_client.utils as gcu
+    _orig_schema_conv = gcu._json_schema_to_python_type
+    def _safe_schema_conv(schema, defs=None):
+        if isinstance(schema, bool):
+            return "Any"
+        return _orig_schema_conv(schema, defs)
+    gcu._json_schema_to_python_type = _safe_schema_conv
+except Exception:
+    pass
+
 # Ensure repository root and testr are on Python path
 REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -247,7 +259,8 @@ def create_demo():
         restore_btn.click(
             fn=restore_image,
             inputs=[input_img, prompt_style, steps, cfg_scale, score_threshold],
-            outputs=[output_restored, output_spotted, detected_text_box]
+            outputs=[output_restored, output_spotted, detected_text_box],
+            api_name=False
         )
 
     return demo
@@ -257,4 +270,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
     app = create_demo()
     print(f"[*] Launching TAIR Gradio Web UI on 0.0.0.0:{port}...")
-    app.launch(server_name="0.0.0.0", server_port=port, share=False)
+    app.launch(server_name="0.0.0.0", server_port=port, share=False, show_api=False, inbrowser=False)

@@ -104,11 +104,16 @@ def ensure_nvme_workspace(repo_dir: Path, custom_workspace: str = None) -> Path:
                 except Exception:
                     link_path.unlink(missing_ok=True)
             elif link_path.is_dir():
-                # If directory exists and is empty, replace with symlink
-                if not any(link_path.iterdir()):
-                    link_path.rmdir()
-                else:
-                    # Non-empty directory: do not overwrite existing contents
+                # If physical directory exists, migrate any existing files to NVMe workspace
+                try:
+                    for item in link_path.iterdir():
+                        dest = target / item.name
+                        if not dest.exists():
+                            shutil.move(str(item), str(dest))
+                    shutil.rmtree(str(link_path))
+                    print(f"[+] Migrated existing {name} data to NVMe workspace")
+                except Exception as e:
+                    print(f"[*] Notice migrating {name}: {e}")
                     continue
 
             if not link_path.exists():

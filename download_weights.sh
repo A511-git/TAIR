@@ -13,13 +13,13 @@ if [ -d "/opt/dlami/nvme" ]; then
     export HF_HOME="/opt/dlami/nvme/workspace/cache/huggingface"
 
     if [ ! -L "weights" ]; then
-        if [ -d "weights" ] && [ ! "$(ls -A weights 2>/dev/null)" ]; then
-            rmdir weights
+        if [ -d "weights" ]; then
+            echo "[*] Migrating existing weights to NVMe ephemeral storage to free root disk..."
+            mv weights/* /opt/dlami/nvme/workspace/weights/ 2>/dev/null || true
+            rm -rf weights
         fi
-        if [ ! -e "weights" ]; then
-            ln -s /opt/dlami/nvme/workspace/weights weights
-            echo "[+] Linked ./weights -> /opt/dlami/nvme/workspace/weights (NVMe Ephemeral Storage)"
-        fi
+        ln -s /opt/dlami/nvme/workspace/weights weights
+        echo "[+] Linked ./weights -> /opt/dlami/nvme/workspace/weights (NVMe Ephemeral Storage)"
     fi
 else
     mkdir -p weights

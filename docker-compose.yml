@@ -25,7 +25,9 @@ services:
     volumes:
       # Mount repository code into /workspace/TAIR (from persistent 72 GB storage)
       - ./:/workspace/TAIR
-      # NVMe Ephemeral Workspace Storage (410 GB) - all heavy/temp data
+      # Mount NVMe Ephemeral Workspace (410 GB) so all host symlinks resolve identically
+      - /opt/dlami/nvme/workspace:/opt/dlami/nvme/workspace
+      # Hugging Face cache on high-speed NVMe
       - /opt/dlami/nvme/workspace/cache/huggingface:/root/.cache/huggingface
       - /opt/dlami/nvme/workspace/uploaded_stuff:/workspace/TAIR/uploaded_stuff
       - /opt/dlami/nvme/workspace/results:/workspace/TAIR/results
