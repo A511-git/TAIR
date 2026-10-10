@@ -49,16 +49,32 @@ def main(args):
         )
 
     
-    # load demo images from dataset folders
+    # load demo images from dataset folders (recursively scanning all subdirectories)
     valid_exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff")
     if not os.path.exists(cfg.dataset.lq_img_path):
         raise FileNotFoundError(f"Input image directory does not exist: {cfg.dataset.lq_img_path}")
-        
-    lq_imgs_path = sorted([os.path.join(cfg.dataset.lq_img_path, img) for img in os.listdir(cfg.dataset.lq_img_path) if img.lower().endswith(valid_exts)])
+
+    def collect_images_recursively(dir_path):
+        collected = []
+        for root, _, files in os.walk(dir_path):
+            for f in sorted(files):
+                p = os.path.join(root, f)
+                if f.lower().endswith(valid_exts):
+                    collected.append(p)
+                else:
+                    try:
+                        with Image.open(p) as test_img:
+                            test_img.verify()
+                            collected.append(p)
+                    except Exception:
+                        pass
+        return sorted(collected)
+
+    lq_imgs_path = collect_images_recursively(cfg.dataset.lq_img_path)
     
     gt_dir = getattr(cfg.dataset, 'gt_img_path', None)
     has_gt = bool(gt_dir) and os.path.exists(str(gt_dir))
-    gt_imgs_path = sorted([os.path.join(gt_dir, img) for img in os.listdir(gt_dir) if img.lower().endswith(valid_exts)]) if has_gt else []
+    gt_imgs_path = collect_images_recursively(gt_dir) if has_gt else []
     
     eval_mode = has_gt and len(gt_imgs_path) == len(lq_imgs_path)
     if not eval_mode and has_gt:

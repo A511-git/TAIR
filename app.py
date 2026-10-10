@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 TAIR: Text-Aware Image Restoration with Diffusion Models (ICLR 2026)
-Interactive Gradio Web Application
-Exposes model restoration, text spotting, and diffusion sampling in a browser UI.
+Interactive & Batch Gradio Web Application
+Supports Single-Image Restoration and Batch / Folder Processing with ZIP Download.
 """
 
 import os
 import sys
+import time
+import zipfile
 from pathlib import Path
 from PIL import Image
 import torch
@@ -39,6 +41,20 @@ import initialize
 
 # Global pipeline cache
 PIPELINE = None
+VALID_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff")
+
+
+def is_valid_image_file(p: Path) -> bool:
+    if not p.is_file():
+        return False
+    if p.suffix.lower() in VALID_IMAGE_EXTS:
+        return True
+    try:
+        with Image.open(p) as img:
+            img.verify()
+            return True
+    except Exception:
+        return False
 
 
 def load_pipeline():
@@ -60,17 +76,19 @@ def load_pipeline():
         config = str(config_path)
         config_testr = str(config_testr_path)
 
+    # Properly scoped DummyAccelerator class accepting device
     class DummyAccelerator:
-        is_main_process = True
-        device = device
+        def __init__(self, dev):
+            self.device = dev
+            self.is_main_process = True
 
-        def prepare(self, m):
-            return m
+        def prepare(self, *m):
+            return m[0] if len(m) == 1 else m
 
         def unwrap_model(self, m):
             return m
 
-    dummy_acc = DummyAccelerator()
+    dummy_acc = DummyAccelerator(device)
     args = DummyArgs()
 
     models, _ = initialize.load_model(dummy_acc, device, args, cfg)
@@ -106,11 +124,10 @@ def load_pipeline():
     return PIPELINE
 
 
-def restore_image(input_image, prompt_style="CAPTION", steps=50, cfg_scale=1.0, score_threshold=0.5):
+def restore_single_image(input_image, prompt_style="CAPTION", steps=50, cfg_scale=1.0, score_threshold=0.5):
     if input_image is None:
         return None, None, "Please upload or select an input image."
 
-    # Check for weights before attempting inference
     weights_path = REPO_ROOT / "weights" / "terediff_stage3.pt"
     if not weights_path.exists():
         msg = (
@@ -184,6 +201,69 @@ def restore_image(input_image, prompt_style="CAPTION", steps=50, cfg_scale=1.0, 
     return restored_pil, pred_text_img, summary_text
 
 
+def restore_batch_images(files, use_server_dir=False, prompt_style="CAPTION", steps=50, cfg_scale=1.0, score_threshold=0.5, progress=gr.Progress()):
+    weights_path = REPO_ROOT / "weights" / "terediff_stage3.pt"
+    if not weights_path.exists():
+        return [], "⚠️ Model weights not found at ./weights/terediff_stage3.pt! Please run bash download_weights.sh.", None
+
+    image_paths = []
+    if use_server_dir:
+        server_dir = REPO_ROOT / "uploaded_stuff"
+        if server_dir.exists():
+            for p in sorted(server_dir.rglob("*")):
+                if is_valid_image_file(p):
+                    image_paths.append(str(p))
+    elif files:
+        for f in files:
+            path_str = f if isinstance(f, str) else getattr(f, "name", str(f))
+            p = Path(path_str)
+            if p.is_dir():
+                for sub in p.rglob("*"):
+                    if is_valid_image_file(sub):
+                        image_paths.append(str(sub))
+            elif is_valid_image_file(p):
+                image_paths.append(str(p))
+
+    if not image_paths:
+        return [], "⚠️ No valid images found to restore. Please upload images/folder or check ./uploaded_stuff.", None
+
+    total = len(image_paths)
+    gallery_items = []
+    timestamp = int(time.time())
+    out_dir = REPO_ROOT / "results" / f"batch_{timestamp}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = REPO_ROOT / "results" / f"restored_batch_{timestamp}.zip"
+
+    pipe = load_pipeline()
+    for idx, img_path in enumerate(image_paths):
+        progress((idx + 1) / total, desc=f"Restoring image {idx+1}/{total}...")
+        try:
+            with Image.open(img_path) as raw:
+                img_pil = raw.convert("RGB")
+            
+            restored, _, text_summary = restore_single_image(img_pil, prompt_style, steps, cfg_scale, score_threshold)
+            if restored:
+                stem = Path(img_path).stem
+                out_file = out_dir / f"restored_{stem}.png"
+                restored.save(out_file)
+                gallery_items.append((restored, f"Restored {stem}"))
+        except Exception as e:
+            print(f"[!] Error processing {img_path}: {e}")
+
+    # Build ZIP archive of all restored images
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for f in out_dir.glob("*.png"):
+            zipf.write(f, arcname=f.name)
+
+    summary_msg = (
+        f"🎉 **Batch Restoration Complete!**\n\n"
+        f"• **Total Images Processed**: {len(gallery_items)} / {total}\n"
+        f"• **Saved on NVMe Disk**: `{out_dir}`\n"
+        f"• **Download Package Ready**: Click the button below to download the ZIP file."
+    )
+    return gallery_items, summary_msg, str(zip_path)
+
+
 def create_demo():
     demo_images = []
     lq_dir = REPO_ROOT / "assets" / "demo_imgs" / "lq"
@@ -192,7 +272,7 @@ def create_demo():
             demo_images.append(str(f))
 
     custom_css = """
-    .gradio-container { max-width: 1200px !important; margin: 0 auto; }
+    .gradio-container { max-width: 1300px !important; margin: 0 auto; }
     .header-banner { text-align: center; margin-bottom: 1.5rem; }
     """
 
@@ -201,67 +281,144 @@ def create_demo():
             gr.Markdown(
                 """
                 # 🌟 TAIR: Text-Aware Image Restoration with Diffusion Models
-                ### **ICLR 2026**
+                ### **ICLR 2026** — Accelerated for NVIDIA Blackwell GPUs (`sm_100`/`sm_120`)
                 Restore heavily degraded scene images while accurately preserving and super-resolving embedded text.
                 """
             )
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                input_img = gr.Image(type="pil", label="Low-Quality (Degraded) Input Image")
-                
-                with gr.Accordion("⚙️ Advanced Restoration Parameters", open=False):
-                    prompt_style = gr.Dropdown(
-                        choices=["CAPTION", "TAG"],
-                        value="CAPTION",
-                        label="Prompting Style",
-                        info="Style of OCR text condition injected into the diffusion prior"
-                    )
-                    steps = gr.Slider(
-                        minimum=10,
-                        maximum=100,
-                        step=5,
-                        value=50,
-                        label="Sampling Steps",
-                        info="Number of DDPM sampling iterations (default: 50)"
-                    )
-                    cfg_scale = gr.Slider(
-                        minimum=1.0,
-                        maximum=5.0,
-                        step=0.5,
-                        value=1.0,
-                        label="CFG Scale",
-                        info="Classifier-Free Guidance strength"
-                    )
-                    score_threshold = gr.Slider(
-                        minimum=0.1,
-                        maximum=0.9,
-                        step=0.05,
-                        value=0.5,
-                        label="Text Spotting Score Threshold",
-                        info="Confidence threshold for TESTR polygon detector"
+        with gr.Tabs():
+            # ==============================================================
+            # TAB 1: Single Image Restoration
+            # ==============================================================
+            with gr.TabItem("🖼️ Single Image Restoration"):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        input_img = gr.Image(type="pil", label="Low-Quality (Degraded) Input Image")
+                        
+                        with gr.Accordion("⚙️ Advanced Restoration Parameters", open=False):
+                            prompt_style = gr.Dropdown(
+                                choices=["CAPTION", "TAG"],
+                                value="CAPTION",
+                                label="Prompting Style",
+                                info="Style of OCR text condition injected into the diffusion prior"
+                            )
+                            steps = gr.Slider(
+                                minimum=10,
+                                maximum=100,
+                                step=5,
+                                value=50,
+                                label="Sampling Steps",
+                                info="Number of DDPM sampling iterations (default: 50)"
+                            )
+                            cfg_scale = gr.Slider(
+                                minimum=1.0,
+                                maximum=5.0,
+                                step=0.5,
+                                value=1.0,
+                                label="CFG Scale",
+                                info="Classifier-Free Guidance strength"
+                            )
+                            score_threshold = gr.Slider(
+                                minimum=0.1,
+                                maximum=0.9,
+                                step=0.05,
+                                value=0.5,
+                                label="Text Spotting Score Threshold",
+                                info="Confidence threshold for TESTR polygon detector"
+                            )
+
+                        restore_btn = gr.Button("🚀 Restore Image & Spot Text", variant="primary", size="lg")
+
+                    with gr.Column(scale=1):
+                        output_restored = gr.Image(type="pil", label="✨ High-Quality Restored Output")
+                        output_spotted = gr.Image(type="pil", label="🔍 Detected Scene Text & Prediction Map")
+                        detected_text_box = gr.Textbox(label="📝 Spotted Text Strings", lines=3)
+
+                if demo_images:
+                    gr.Examples(
+                        examples=demo_images[:4],
+                        inputs=input_img,
+                        label="Sample Demo Images (Degraded Inputs)"
                     )
 
-                restore_btn = gr.Button("🚀 Restore Image & Spot Text", variant="primary", size="lg")
+                restore_btn.click(
+                    fn=restore_single_image,
+                    inputs=[input_img, prompt_style, steps, cfg_scale, score_threshold],
+                    outputs=[output_restored, output_spotted, detected_text_box],
+                    api_name=False
+                )
 
-            with gr.Column(scale=1):
-                output_restored = gr.Image(type="pil", label="✨ High-Quality Restored Output")
-                output_spotted = gr.Image(type="pil", label="🔍 Detected Scene Text & Prediction Map")
-                detected_text_box = gr.Textbox(label="📝 Spotted Text Strings", lines=3)
+            # ==============================================================
+            # TAB 2: Batch & Folder Restoration
+            # ==============================================================
+            with gr.TabItem("📁 Batch & Folder Restoration"):
+                gr.Markdown(
+                    """
+                    ### 📁 Bulk Image & Folder Super-Resolution
+                    Upload a folder of images or multiple files, or restore images uploaded directly to `./uploaded_stuff` on your NVMe storage.
+                    """
+                )
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        batch_files = gr.File(
+                            file_count="multiple",
+                            label="Select or Drag Images / Folder"
+                        )
+                        use_server_folder = gr.Checkbox(
+                            label="📁 Process All Images Already in Server NVMe Folder (./uploaded_stuff)",
+                            value=False,
+                            info="Processes all images in ./uploaded_stuff and subdirectories (e.g. text_images/)"
+                        )
 
-        if demo_images:
-            gr.Examples(
-                examples=demo_images[:4],
-                inputs=input_img,
-                label="Sample Demo Images (Degraded Inputs)"
-            )
+                        with gr.Accordion("⚙️ Batch Restoration Parameters", open=False):
+                            batch_prompt_style = gr.Dropdown(
+                                choices=["CAPTION", "TAG"],
+                                value="CAPTION",
+                                label="Prompting Style"
+                            )
+                            batch_steps = gr.Slider(
+                                minimum=10,
+                                maximum=100,
+                                step=5,
+                                value=50,
+                                label="Sampling Steps"
+                            )
+                            batch_cfg = gr.Slider(
+                                minimum=1.0,
+                                maximum=5.0,
+                                step=0.5,
+                                value=1.0,
+                                label="CFG Scale"
+                            )
+                            batch_threshold = gr.Slider(
+                                minimum=0.1,
+                                maximum=0.9,
+                                step=0.05,
+                                value=0.5,
+                                label="Text Spotting Score Threshold"
+                            )
 
-        restore_btn.click(
-            fn=restore_image,
-            inputs=[input_img, prompt_style, steps, cfg_scale, score_threshold],
-            outputs=[output_restored, output_spotted, detected_text_box],
-            api_name=False
-        )
+                        batch_run_btn = gr.Button("⚡ Restore All Images in Batch", variant="primary", size="lg")
+
+                    with gr.Column(scale=1):
+                        batch_status = gr.Markdown("⏳ Waiting for batch job...")
+                        batch_zip_download = gr.File(label="📦 Download All Restored Images (ZIP Package)")
+
+                with gr.Row():
+                    batch_gallery = gr.Gallery(
+                        label="🖼️ Restored Image Gallery",
+                        columns=3,
+                        rows=2,
+                        height="auto",
+                        preview=True
+                    )
+
+                batch_run_btn.click(
+                    fn=restore_batch_images,
+                    inputs=[batch_files, use_server_folder, batch_prompt_style, batch_steps, batch_cfg, batch_threshold],
+                    outputs=[batch_gallery, batch_status, batch_zip_download],
+                    api_name=False
+                )
 
     return demo
 

@@ -22,17 +22,34 @@ REQUIRED_WEIGHTS = [
 ]
 
 
-def find_valid_images(folder_path: Path, recursive: bool = False):
+def is_valid_image(p: Path) -> bool:
+    if not p.is_file():
+        return False
+    if p.suffix.lower() in VALID_IMAGE_EXTENSIONS:
+        return True
+    try:
+        from PIL import Image
+        with Image.open(p) as img:
+            img.verify()
+            return True
+    except Exception:
+        return False
+
+
+def find_valid_images(folder_path: Path, recursive: bool = True):
     if not folder_path.exists():
         raise FileNotFoundError(
             f"Input directory does not exist: {folder_path}. "
             "Please upload test images via Link 1 (Upload Portal) into ./uploaded_stuff first."
         )
 
+    if folder_path.is_file():
+        return [str(folder_path)] if is_valid_image(folder_path) else []
+
     pattern = "**/*" if recursive else "*"
     images = [
         str(p) for p in folder_path.glob(pattern)
-        if p.is_file() and p.suffix.lower() in VALID_IMAGE_EXTENSIONS
+        if is_valid_image(p)
     ]
     return sorted(images)
 
@@ -62,7 +79,7 @@ def verify_weights(repo_dir: Path) -> bool:
 
 def run_batch_inference(input_dir: str, output_dir: str, config: str = "configs/val/val_terediff.yaml",
                         config_testr: str = "testr/configs/TESTR/TESTR_R_50_Polygon.yaml",
-                        recursive: bool = False):
+                        recursive: bool = True):
     repo_dir = Path(__file__).resolve().parent.parent
     in_path = Path(input_dir).resolve()
     out_path = Path(output_dir).resolve()
@@ -135,7 +152,8 @@ def main():
     parser.add_argument("--output_dir", "-o", type=str, default="./results", help="Directory to save restored images (default: ./results)")
     parser.add_argument("--config", "-c", type=str, default="configs/val/val_terediff.yaml", help="Path to TAIR YAML configuration")
     parser.add_argument("--config_testr", type=str, default="testr/configs/TESTR/TESTR_R_50_Polygon.yaml", help="Path to TESTR config")
-    parser.add_argument("--recursive", "-r", action="store_true", help="Search input directory recursively")
+    parser.add_argument("--recursive", "-r", action="store_true", default=True, help="Search input directory recursively (default: True)")
+    parser.add_argument("--no-recursive", dest="recursive", action="store_false", help="Disable recursive search")
     args = parser.parse_args()
 
     run_batch_inference(
