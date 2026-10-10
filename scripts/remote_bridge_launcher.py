@@ -156,6 +156,8 @@ class RemoteBridgeLauncher:
                 "weights_dir": str(self.workspace_dir / "weights"),
             }
         }
+        # Guarantee status files exist immediately on disk so cat never returns ENOENT
+        self._save_links_to_disk()
 
     def run(self):
         print("=" * 78)
@@ -167,6 +169,8 @@ class RemoteBridgeLauncher:
         # -------------------------------------------------------------
         # 1. Start Confirmed Link 1: Upload Portal (Pointed to NVMe)
         # -------------------------------------------------------------
+        self._save_links_to_disk()
+
         upload_target = self.workspace_dir / "uploaded_stuff"
         upload_target.mkdir(parents=True, exist_ok=True)
 
@@ -193,6 +197,7 @@ class RemoteBridgeLauncher:
             "public_url": upload_tunnel_url,
             "target": str(upload_target)
         }
+        self._save_links_to_disk()
         if upload_tunnel_url:
             print(f"[+] Confirmed Link 1 Active: {upload_tunnel_url} (Routing to NVMe: {upload_target})")
         else:
@@ -224,6 +229,7 @@ class RemoteBridgeLauncher:
             "public_url": http_tunnel_url,
             "target": str(self.repo_dir)
         }
+        self._save_links_to_disk()
         if http_tunnel_url:
             print(f"[+] Confirmed Link 2 Active: {http_tunnel_url} (Navigates Repo + results + nvme_workspace)")
         else:
@@ -266,6 +272,7 @@ class RemoteBridgeLauncher:
                 "public_url": fe_tunnel_url,
                 "entrypoint": f_entry
             }
+            self._save_links_to_disk()
             if fe_tunnel_url:
                 print(f"[+] Optional Link 3 Active: {fe_tunnel_url}")
             else:
@@ -297,12 +304,18 @@ class RemoteBridgeLauncher:
             f.write("# Active Remote Bridge Links (2-Tier Storage Layout)\n\n")
             f.write(f"- **Persistent Storage (72 GB)**: `{self.repo_dir}`\n")
             f.write(f"- **NVMe Ephemeral Workspace (410 GB)**: `{self.workspace_dir}`\n\n")
-            if self.links["upload_portal"] and self.links["upload_portal"]["public_url"]:
-                f.write(f"- **Link 1 (Upload UI)**: {self.links['upload_portal']['public_url']} (Direct to NVMe: `{self.workspace_dir}/uploaded_stuff`)\n")
-            if self.links["repo_http_server"] and self.links["repo_http_server"]["public_url"]:
-                f.write(f"- **Link 2 (Repo HTTP)**: {self.links['repo_http_server']['public_url']} (Navigates code, `results/`, and `nvme_workspace/`)\n")
-            if self.links["inbuilt_frontend"] and self.links["inbuilt_frontend"].get("public_url"):
-                f.write(f"- **Link 3 (Frontend)**: {self.links['inbuilt_frontend']['public_url']} ({self.links['frontend_type']})\n")
+            u_info = self.links.get("upload_portal") or {}
+            h_info = self.links.get("repo_http_server") or {}
+            fe_info = self.links.get("inbuilt_frontend") or {}
+            f_type = self.links.get("frontend_type", "gradio")
+
+            u_link = u_info.get("public_url")
+            h_link = h_info.get("public_url")
+            fe_link = fe_info.get("public_url")
+
+            f.write(f"- **Link 1 (Upload UI)**: {u_link if u_link else 'Establishing tunnel...'}\n")
+            f.write(f"- **Link 2 (Repo & NVMe HTTP Viewer)**: {h_link if h_link else 'Establishing tunnel...'}\n")
+            f.write(f"- **Link 3 (Frontend)**: {fe_link if fe_link else 'Establishing tunnel...'} ({f_type})\n")
 
     def _print_summary_banner(self):
         u_url = self.links["upload_portal"]["public_url"] if self.links["upload_portal"] else "N/A"
