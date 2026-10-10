@@ -30,6 +30,8 @@ import os
 import sys
 import subprocess
 import urllib.request
+import http.cookiejar
+import re
 
 try:
     import torch
@@ -39,13 +41,68 @@ except ImportError:
     print("    Skipping in-memory tensor deserialization on host.")
     print("    Byte-size/integrity verification will be performed; deep tensor verification runs inside the container.")
 
-# Ensure gdown is available for downloading TeReDiff from Google Drive
+# Resolve or install gdown with PEP 668 support, or fall back to native HTTP
+gdown = None
 try:
     import gdown
 except ImportError:
-    print("[*] Installing gdown for Google Drive downloads...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "gdown"], check=True)
-    import gdown
+    for install_cmd in [
+        [sys.executable, "-m", "pip", "install", "--break-system-packages", "gdown"],
+        [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "gdown"],
+        [sys.executable, "-m", "pip", "install", "gdown"],
+    ]:
+        try:
+            subprocess.run(install_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            import gdown
+            break
+        except Exception:
+            pass
+
+def download_gdrive(file_id, output_path):
+    """Downloads from Google Drive using gdown if available, else zero-dependency streaming with cookie confirmation."""
+    if gdown is not None:
+        gdown.download(id=file_id, output=output_path, quiet=False)
+        return
+
+    print(f"[*] Downloading from Google Drive using zero-dependency HTTP client...")
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    base_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    req = urllib.request.Request(base_url, headers={"User-Agent": "Mozilla/5.0"})
+    
+    with opener.open(req) as resp:
+        first_chunk = resp.read(65536)
+        text = first_chunk.decode("utf-8", errors="ignore")
+        match = re.search(r'confirm=([0-9A-Za-z_]+)', text)
+        if match:
+            confirm = match.group(1)
+            confirm_url = f"https://drive.google.com/uc?export=download&confirm={confirm}&id={file_id}"
+            req2 = urllib.request.Request(confirm_url, headers={"User-Agent": "Mozilla/5.0"})
+            with opener.open(req2) as resp2:
+                with open(output_path, "wb") as f:
+                    downloaded = 0
+                    while True:
+                        chunk = resp2.read(2 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        sys.stdout.write(f"\r[>] Downloaded: {downloaded / (1024*1024):.1f} MB")
+                        sys.stdout.flush()
+            print()
+        else:
+            with open(output_path, "wb") as f:
+                f.write(first_chunk)
+                downloaded = len(first_chunk)
+                while True:
+                    chunk = resp.read(2 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    sys.stdout.write(f"\r[>] Downloaded: {downloaded / (1024*1024):.1f} MB")
+                    sys.stdout.flush()
+            print()
 
 HF_MODELS = [
     {
@@ -147,7 +204,7 @@ for m in GDRIVE_MODELS:
 
     if need_download:
         print(f"[>] Downloading {m['name']} from Google Drive...")
-        gdown.download(id=m["gdrive_id"], output=path, quiet=False)
+        download_gdrive(m["gdrive_id"], path)
         size_mb = os.path.getsize(path) / (1024 * 1024)
         assert size_mb >= m["min_size_mb"], f"Downloaded file too small: {size_mb} MB"
         if torch is not None:

@@ -44,9 +44,18 @@ def ensure_gdown():
         return gdown
     except ImportError:
         print("[*] Installing gdown for Google Drive downloads...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "gdown"], check=True)
-        import gdown
-        return gdown
+        for cmd in [
+            [sys.executable, "-m", "pip", "install", "--break-system-packages", "gdown"],
+            [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "gdown"],
+            [sys.executable, "-m", "pip", "install", "gdown"],
+        ]:
+            try:
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                import gdown
+                return gdown
+            except Exception:
+                pass
+        return None
 
 
 def verify_and_download_hf(model_name, url_or_repo, target_dir="weights", token: str = None):
