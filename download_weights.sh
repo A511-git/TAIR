@@ -25,13 +25,27 @@ else
     mkdir -p weights
 fi
 
+# Ensure gdown is available on host if possible
+if ! python3 -c "import gdown" 2>/dev/null; then
+    pip install --break-system-packages gdown 2>/dev/null || \
+    sudo pip install --break-system-packages gdown 2>/dev/null || \
+    python3 -m pip install --break-system-packages gdown 2>/dev/null || true
+fi
+
 python3 - << 'EOF'
 import os
 import sys
+import glob
 import subprocess
 import urllib.request
+import urllib.parse
 import http.cookiejar
 import re
+
+# Add user site-packages to sys.path so pip --user packages are visible
+for p in glob.glob(os.path.expanduser("~/.local/lib/python*/site-packages")):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 try:
     import torch
@@ -41,68 +55,85 @@ except ImportError:
     print("    Skipping in-memory tensor deserialization on host.")
     print("    Byte-size/integrity verification will be performed; deep tensor verification runs inside the container.")
 
-# Resolve or install gdown with PEP 668 support, or fall back to native HTTP
-gdown = None
-try:
-    import gdown
-except ImportError:
-    for install_cmd in [
-        [sys.executable, "-m", "pip", "install", "--break-system-packages", "gdown"],
-        [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "gdown"],
-        [sys.executable, "-m", "pip", "install", "gdown"],
-    ]:
-        try:
-            subprocess.run(install_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            import gdown
-            break
-        except Exception:
-            pass
-
 def download_gdrive(file_id, output_path):
-    """Downloads from Google Drive using gdown if available, else zero-dependency streaming with cookie confirmation."""
-    if gdown is not None:
+    """Downloads from Google Drive using gdown, docker container gdown, or resilient HTTP fallback."""
+    # 1. Try python gdown module
+    try:
+        import gdown
+        print(f"[>] Using gdown module to download Google Drive file...")
         gdown.download(id=file_id, output=output_path, quiet=False)
-        return
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 100 * 1024 * 1024:
+            return
+    except Exception as e:
+        print(f"[*] Note: gdown module: {e}")
 
-    print(f"[*] Downloading from Google Drive using zero-dependency HTTP client...")
+    # 2. Try CLI gdown
+    if subprocess.call(["which", "gdown"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+        print("[>] Trying system gdown command...")
+        res = subprocess.call(["gdown", "--id", file_id, "-O", output_path])
+        if res == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 100 * 1024 * 1024:
+            return
+
+    # 3. Try container gdown (if docker container tair is running)
+    try:
+        print("[>] Trying Docker container gdown...")
+        subprocess.run(
+            ["docker", "compose", "exec", "-T", "tair", "gdown", "--id", file_id, "-O", f"/workspace/TAIR/{output_path}"],
+            check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 100 * 1024 * 1024:
+            print("[+] Downloaded successfully via Docker container gdown!")
+            return
+    except Exception:
+        pass
+
+    # 4. Resilient native HTTP with cookie and form parsing
+    print(f"[*] Downloading from Google Drive using resilient HTTP client...")
     cj = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
     base_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    req = urllib.request.Request(base_url, headers={"User-Agent": "Mozilla/5.0"})
+    req = urllib.request.Request(base_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     
     with opener.open(req) as resp:
-        first_chunk = resp.read(65536)
-        text = first_chunk.decode("utf-8", errors="ignore")
-        match = re.search(r'confirm=([0-9A-Za-z_]+)', text)
-        if match:
-            confirm = match.group(1)
-            confirm_url = f"https://drive.google.com/uc?export=download&confirm={confirm}&id={file_id}"
-            req2 = urllib.request.Request(confirm_url, headers={"User-Agent": "Mozilla/5.0"})
-            with opener.open(req2) as resp2:
-                with open(output_path, "wb") as f:
-                    downloaded = 0
-                    while True:
-                        chunk = resp2.read(2 * 1024 * 1024)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        sys.stdout.write(f"\r[>] Downloaded: {downloaded / (1024*1024):.1f} MB")
-                        sys.stdout.flush()
-            print()
-        else:
-            with open(output_path, "wb") as f:
-                f.write(first_chunk)
-                downloaded = len(first_chunk)
-                while True:
-                    chunk = resp.read(2 * 1024 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    sys.stdout.write(f"\r[>] Downloaded: {downloaded / (1024*1024):.1f} MB")
-                    sys.stdout.flush()
-            print()
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    action_match = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', html)
+    inputs = dict(re.findall(r'<input[^>]+name=["\']([^"\']+)["\'][^>]+value=["\']([^"\']+)["\']', html))
+    inputs.update(dict(re.findall(r'<input[^>]+value=["\']([^"\']+)["\'][^>]+name=["\']([^"\']+)["\']', html)))
+
+    download_url = None
+    if action_match and ("confirm" in inputs or "uuid" in inputs):
+        action_url = action_match.group(1)
+        if not action_url.startswith("http"):
+            action_url = f"https://drive.google.com{action_url}"
+        params = urllib.parse.urlencode(inputs)
+        download_url = f"{action_url}?{params}"
+    elif "confirm=" in html:
+        confirm_token = re.search(r'confirm=([0-9A-Za-z_-]+)', html).group(1)
+        download_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
+    else:
+        link_match = re.search(r'id=["\']uc-download-link["\'][^>]*href=["\']([^"\']+)["\']', html)
+        if link_match:
+            download_url = link_match.group(1).replace("&amp;", "&")
+            if not download_url.startswith("http"):
+                download_url = f"https://drive.google.com{download_url}"
+
+    if not download_url:
+        download_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+
+    req2 = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    with opener.open(req2) as resp2:
+        with open(output_path, "wb") as f:
+            downloaded = 0
+            while True:
+                chunk = resp2.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                sys.stdout.write(f"\r[>] Downloaded: {downloaded / (1024*1024):.1f} MB")
+                sys.stdout.flush()
+    print()
 
 HF_MODELS = [
     {
@@ -205,8 +236,10 @@ for m in GDRIVE_MODELS:
     if need_download:
         print(f"[>] Downloading {m['name']} from Google Drive...")
         download_gdrive(m["gdrive_id"], path)
-        size_mb = os.path.getsize(path) / (1024 * 1024)
-        assert size_mb >= m["min_size_mb"], f"Downloaded file too small: {size_mb} MB"
+        if size_mb < m["min_size_mb"]:
+            if os.path.exists(path):
+                os.remove(path)
+            raise AssertionError(f"Downloaded file too small: {size_mb:.2f} MB (< {m['min_size_mb']} MB).")
         if torch is not None:
             torch.load(path, map_location="cpu", weights_only=False)
             print(f"[+] VERIFIED 100%: {m['name']} downloaded and verified successfully!")
