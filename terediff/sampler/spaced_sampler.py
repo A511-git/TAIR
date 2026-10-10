@@ -91,8 +91,9 @@ class SpacedSampler(Sampler):
         alphas_cumprod = np.cumprod(alphas, axis=0)
         alphas_cumprod_prev = np.append(1.0, alphas_cumprod[:-1])
 
-        sqrt_recip_alphas_cumprod = np.sqrt(1.0 / alphas_cumprod)
-        sqrt_recipm1_alphas_cumprod = np.sqrt(1.0 / alphas_cumprod - 1)
+        safe_alphas_cumprod = np.maximum(alphas_cumprod, 1e-20)
+        sqrt_recip_alphas_cumprod = np.sqrt(1.0 / safe_alphas_cumprod)
+        sqrt_recipm1_alphas_cumprod = np.sqrt(np.maximum(1.0 / safe_alphas_cumprod - 1, 0.0))
         posterior_variance = (
             betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
         )
