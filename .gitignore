@@ -55,3 +55,15 @@ model_ts*.txt
 .vscode
 _darcs
 
+# 2-Tier Storage & Remote Bridge
+uploaded_stuff/
+results/
+models/
+weights/
+nvme_workspace
+.remote_bridge/
+.workspace/
+.env
+.env.local
+*.log
+.agents/

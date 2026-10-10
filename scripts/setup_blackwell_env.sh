@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Setup script for TAIR on NVIDIA RTX PRO 4500 Blackwell (or modern Blackwell GPUs)
+# Blackwell Environment Bootstrap Script (RTX PRO 4500, B100, B200, sm_100/120)
+# Enforces 2-Tier Storage: Persistent /home/ubuntu/working & Ephemeral NVMe
 # ==============================================================================
 
 set -e
 
-# Allow uv to manage packages in active conda or system python environments
+# Allow uv to operate seamlessly in system/conda environments
 export UV_SYSTEM_PYTHON=1
 
 echo "=== [1/6] Verifying GPU and System Prerequisites ==="
@@ -16,7 +17,7 @@ fi
 
 nvidia-smi
 
-# Check CUDA Toolkit / NVCC (prefer CUDA 12.8 if installed, otherwise use default CUDA)
+# Check CUDA Toolkit / NVCC (prefer CUDA 12.8 if installed)
 if [ -d "/usr/local/cuda-12.8" ]; then
     export CUDA_HOME="/usr/local/cuda-12.8"
 elif [ -d "/usr/local/cuda-12" ]; then
@@ -31,10 +32,12 @@ if [ -n "$CUDA_HOME" ]; then
     export PATH="$CUDA_HOME/bin:$PATH"
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
     echo "Using CUDA_HOME: $CUDA_HOME"
-    nvcc --version | grep "release" || true
+    if command -v nvcc &> /dev/null; then
+        nvcc --version | grep "release" || true
+    fi
 fi
 
-echo "=== [2/7] Provisioning NVMe Ephemeral Workspace (/opt/dlami/nvme/workspace) ==="
+echo "=== [2/6] Provisioning NVMe Ephemeral Workspace (/opt/dlami/nvme/workspace) ==="
 if [ -d "/opt/dlami/nvme" ]; then
     sudo mkdir -p /opt/dlami/nvme/workspace/cache/huggingface
     sudo mkdir -p /opt/dlami/nvme/workspace/uploaded_stuff
@@ -44,6 +47,7 @@ if [ -d "/opt/dlami/nvme" ]; then
     sudo chown -R $(id -u):$(id -g) /opt/dlami/nvme/workspace
     echo "[+] NVMe Ephemeral Workspace subdirectories provisioned with user permissions."
 
+    # Create repo symlinks if running from inside a git repo
     for item in uploaded_stuff results models weights; do
         if [ ! -e "$item" ]; then
             ln -s "/opt/dlami/nvme/workspace/$item" "$item" 2>/dev/null || true
@@ -53,15 +57,18 @@ if [ -d "/opt/dlami/nvme" ]; then
     if [ ! -e "nvme_workspace" ]; then
         ln -s "/opt/dlami/nvme/workspace" "nvme_workspace" 2>/dev/null || true
     fi
+else
+    echo "[*] Notice: /opt/dlami/nvme not found. Using local workspace fallback."
 fi
 
-echo "=== [3/7] Installing uv, ninja, gdown, and PyTorch with CUDA 12.8 (Blackwell Support) ==="
+echo "=== [3/6] Installing uv, ninja, gdown, and modern wheel tooling ==="
 pip install uv ninja gdown
 uv pip install --upgrade setuptools wheel
 
+echo "=== [4/6] Installing PyTorch with CUDA 12.8 (Blackwell SM_100/SM_120 Support) ==="
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Patch PyTorch cpp_extension to allow nvcc version mismatch (e.g., nvcc 13.2 vs torch 12.8)
+echo "=== [5/6] Patching PyTorch cpp_extension to bypass NVCC version mismatch ==="
 python -c '
 import torch.utils.cpp_extension as ce
 p = ce.__file__
@@ -75,27 +82,14 @@ if target in src:
     print("[+] Patched PyTorch cpp_extension: CUDA version mismatch check bypassed.")
 '
 
-echo "=== [4/7] Installing TAIR Python Dependencies with uv ==="
-uv pip install -r requirements.txt
-
-echo "=== [5/7] Compiling and Installing Detectron2 for Blackwell ==="
 export FORCE_CUDA=1
 export TORCH_CUDA_ARCH_LIST="12.0;10.0"
 
-cd detectron2
-rm -rf build/ **/*.so
-uv pip install --no-build-isolation -e .
-cd ..
-
-echo "=== [6/7] Compiling and Installing TESTR (AdelaiDet) for Blackwell ==="
-cd testr
-rm -rf build/ **/*.so
-uv pip install --no-build-isolation -e .
-cd ..
-
-echo "=== [7/7] Verifying Setup and Hardware Compatibility ==="
-python check_environment.py
+echo "=== [6/6] Running Hardware Diagnostic ==="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python "$SCRIPT_DIR/check_blackwell_env.py"
 
 echo "=================================================================="
-echo " Setup complete! Your environment is ready for training & demo."
+echo " Blackwell environment is bootstrapped and verified!"
+echo " 2-Tier Storage: Persistent /home/ubuntu/working & Ephemeral NVMe ready."
 echo "=================================================================="

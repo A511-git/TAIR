@@ -1,0 +1,38 @@
+services:
+  tair:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tair_blackwell_container
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - FORCE_CUDA=1
+      - TORCH_CUDA_ARCH_LIST=12.0;10.0
+      - UV_SYSTEM_PYTHON=1
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    ports:
+      - "7860:7860"
+    volumes:
+      # Mount repository code into /workspace/TAIR (from persistent 72 GB storage)
+      - ./:/workspace/TAIR
+      # NVMe Ephemeral Workspace Storage (410 GB) - all heavy/temp data
+      - /opt/dlami/nvme/workspace/cache/huggingface:/root/.cache/huggingface
+      - /opt/dlami/nvme/workspace/uploaded_stuff:/workspace/TAIR/uploaded_stuff
+      - /opt/dlami/nvme/workspace/results:/workspace/TAIR/results
+      - /opt/dlami/nvme/workspace/models:/workspace/TAIR/models
+      - /opt/dlami/nvme/workspace/weights:/workspace/TAIR/weights
+    ipc: host
+    stdin_open: true
+    tty: true
+    working_dir: /workspace/TAIR
+    command: /bin/bash

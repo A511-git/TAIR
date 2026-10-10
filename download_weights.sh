@@ -4,7 +4,26 @@
 # ==============================================================================
 
 set -e
-mkdir -p weights
+
+# Enforce 2-Tier Storage: route heavy weights directly to NVMe Ephemeral Workspace
+if [ -d "/opt/dlami/nvme" ]; then
+    sudo mkdir -p /opt/dlami/nvme/workspace/weights
+    sudo mkdir -p /opt/dlami/nvme/workspace/cache/huggingface
+    sudo chown -R $(id -u):$(id -g) /opt/dlami/nvme/workspace
+    export HF_HOME="/opt/dlami/nvme/workspace/cache/huggingface"
+
+    if [ ! -L "weights" ]; then
+        if [ -d "weights" ] && [ ! "$(ls -A weights 2>/dev/null)" ]; then
+            rmdir weights
+        fi
+        if [ ! -e "weights" ]; then
+            ln -s /opt/dlami/nvme/workspace/weights weights
+            echo "[+] Linked ./weights -> /opt/dlami/nvme/workspace/weights (NVMe Ephemeral Storage)"
+        fi
+    fi
+else
+    mkdir -p weights
+fi
 
 python3 - << 'EOF'
 import os
